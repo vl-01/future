@@ -1,0 +1,6 @@
+name "future"
+description "asynchronous return values and related functionality"
+copyright "Copyright © 2016, Vlad Levenfeld"
+authors "Vlad Levenfeld"
+dependency "universal" version="0.1.0"
+targetType "sourceLibrary"
