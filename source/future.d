@@ -291,7 +291,7 @@ template when(futureNames...) if(allSatisfy!(isString, futureNames)) // names ar
   {
     alias Result(F) = typeof(F.init.result());
     alias Types = staticMap!(Result, Futures);
-    alias When = Tuple!(DeclSpecs!(Types, futureNames));
+    alias When = Tuple!(declSpecs!(Types, futureNames));
 
     shared(Future!When) when(Futures futures)
     {
@@ -315,7 +315,7 @@ template race(futureNames...) if(allSatisfy!(isString, futureNames)) // names ar
   {
     alias Result(F) = typeof(F.init.result());
     alias Types = staticMap!(Result, Futures);
-    alias Race = Union!(DeclSpecs!(futureNames, Types));
+    alias Race = Union!(declSpecs!(futureNames, Types));
 
     shared(Future!Race) race(Futures futures)
     {
