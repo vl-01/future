@@ -1,6 +1,7 @@
 module future;
 
 import core.thread;
+import std.datetime;
 import std.concurrency : spawn;
 import std.experimental.logger;
 import std.typetuple;
@@ -137,7 +138,7 @@ alias defaultWait = Thread.yield;
 
 static:
 
-template Future(A, alias f)
+template Future(A)
 {
   final shared class Future
   {
@@ -149,30 +150,34 @@ template Future(A, alias f)
     bool _ready;
   }
 }
-alias Future(A) = Future!(A, identity);
-enum isFuture(F) = is(F == Future!(A,f), A, alias f);
+enum isFuture(F) = is(F == Future!A, A);
 
-template pending(A, alias f)
+template pending(A)
 {
-  shared(Future!(A,f)) pending()
+  shared(Future!A) pending()
   { return new typeof(return); }
 }
-template result(A, alias f)
+template ready(A)
 {
-  A result(shared(Future!(A,f)) future) 
+	shared(Future!A) ready(A a)
+  { return (new typeof(return)).fulfill(a); }
+}
+template result(A)
+{
+  A result(shared(Future!A) future) 
   in{ assert(future.isReady); }
   body{ return *cast(A*)&future._result; }
 }
-template fulfill(B, alias f, A...)
+template fulfill(A)
 {
-  shared(Future!(B,f)) fulfill(shared(Future!(B,f)) future, A args)
+  shared(Future!A) fulfill(shared(Future!A) future, A a)
   {
       synchronized(future)
         if(future.isReady)
           return future;
         else
         {
-          *cast(B*)&future._result = apply!f(args);
+          *cast(A*)&future._result = a;
           future._ready = true;
         }
 
@@ -184,9 +189,9 @@ template fulfill(B, alias f, A...)
       return future;
   }
 }
-template onFulfill(B, alias f)
+template onFulfill(A)
 {
-  void onFulfill(shared(Future!(B,f)) future, void delegate(B) callback)
+  void onFulfill(shared(Future!A) future, void delegate(A) callback)
   {
     synchronized(future)
       if(future.isReady) // REVIEW could this lead to deadlock? can that be analyzed with π calculus?
@@ -196,17 +201,16 @@ template onFulfill(B, alias f)
   }
 }
 
-alias pending(A) = pending!(A,    identity);
-alias pending()  = pending!(Unit, identity);
+alias pending()  = pending!Unit;
 
-template isReady(A, alias f)
+template isReady(A)
 {
-  bool isReady(shared(Future!(A,f)) future)
+  bool isReady(shared(Future!A) future)
   { return future._ready; }
 }
-template isPending(A, alias f)
+template isPending(A)
 {
-  bool isPending(shared(Future!(A,f)) future)
+  bool isPending(shared(Future!A) future)
   { return ! future.isReady; }
 }
 
@@ -217,8 +221,8 @@ template async(alias f) // applied
     alias g = tryCatch!f;
     alias B = typeof(g(A.init));
 
-    static void run(shared(Future!(B,g)) future, A args)
-    { future.fulfill(args); }
+    static void run(shared(Future!B) future, A args)
+    { future.fulfill(g(args)); }
 
     shared(Future!(B,g)) async(A args)
     {
@@ -232,11 +236,21 @@ template async(alias f) // applied
 }
 template await(alias wait = defaultWait)
 {
-  template await(A, alias f)
+  template await(A)
   {
-    shared(Future!(A,f)) await(shared(Future!(A,f)) future)
+    shared(Future!A) await(shared(Future!A) future)
     {
       while(future.isPending)
+        wait();
+
+      return future;
+    }
+
+    shared(Future!A) await(shared(Future!A) future, Duration timeout)
+    {
+			auto start = Clock.currTime;
+
+      while(future.isPending && Clock.currTime < start + timeout)
         wait();
 
       return future;
@@ -246,21 +260,21 @@ template await(alias wait = defaultWait)
 
 template next(alias f) // applied
 {
-  template next(A, alias g, C...)
+  template next(A, B...)
   {
-    alias B = typeof(apply!f(A.init, C.init).result);
+    alias C = typeof(apply!f(A.init, B.init).result);
 
-    shared(Future!B) next(shared(Future!(A,g)) future, C args)
+    shared(Future!C) next(shared(Future!A) future, B args)
     { return future.then!f(args).sync; }
   }
 }
-template sync(A, alias f, alias g)
+template sync(A)
 {
-  shared(Future!A) sync(shared(Future!(shared(Future!(A,f)), g)) future)
+  shared(Future!A) sync(shared(Future!(shared(Future!A))) future)
   {
     auto synced = pending!A;
 
-    future.onFulfill((shared(Future!(A,f)) nextFuture)
+    future.onFulfill((shared(Future!A) nextFuture)
     { nextFuture.onFulfill((A a){ synced.fulfill(a); }); }
     );
 
@@ -269,64 +283,74 @@ template sync(A, alias f, alias g)
 }
 template then(alias f) // applied
 {
-  template then(A, alias g, B...)
+  template then(A, B...)
   {
     alias C = typeof(apply!f(A.init, B.init));
 
-    shared(Future!(C,f)) then(shared(Future!(A,g)) future, B args)
+    shared(Future!C) then(shared(Future!A) future, B args)
     {
-      auto thenFuture = pending!(C,f);
+      auto thenFuture = pending!C;
 
       future.onFulfill((A result)
-      { thenFuture.fulfill(result, args); }
+      { thenFuture.fulfill(apply!f(result, args)); }
       );
 
       return thenFuture;
     }
   }
 }
-template when(futureNames...) if(allSatisfy!(isString, futureNames)) // names are optional
+
+template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types)) 
 {
-  template when(Futures...) if(allSatisfy!(isFuture, Futures))
-  {
-    alias Result(F) = typeof(F.init.result());
-    alias Types = staticMap!(Result, Futures);
-    alias When = Tuple!(declSpecs!(Types, futureNames));
+	alias Result(F) = F.Result;
+	alias When = TTypeMap!(Result, A);
 
-    shared(Future!When) when(Futures futures)
-    {
-      auto allFuture = pending!When;
+	shared(Future!When) when(A futures)
+	{
+		auto allFuture = pending!When;
 
-      foreach(i, future; futures[])
-        future.onFulfill((Types[i])
-        {
-          if(all(futures.t_.tlift!isReady[].only))
-            allFuture.fulfill(futures.t_.tlift!result);
-        }
-        );
+		foreach(i, future; futures)
+			future.onFulfill((When.Types[i])
+			{
+				if(all(futures.tlift!isReady[].only))
+					allFuture.fulfill(
+						futures.tlift!result
+					);
+			}
+			);
 
-      return allFuture;
-    }
-  }
+		return allFuture;
+	}
 }
-template race(futureNames...) if(allSatisfy!(isString, futureNames)) // names are optional
+template when(Futures...) if(allSatisfy!(isFuture, Futures)) 
 {
-  template race(Futures...) if(allSatisfy!(isFuture, Futures))
-  {
-    alias Result(F) = typeof(F.init.result());
-    alias Types = staticMap!(Result, Futures);
-    alias Race = Union!(declSpecs!(futureNames, Types));
+	auto when(Futures futures)
+	{
+		return .when(futures.tuple);
+	}
+}
 
-    shared(Future!Race) race(Futures futures)
-    {
-      auto anyFuture = pending!Race;
+template race(A) if(isTuple!A && allSatisfy!(isFuture, A.Types)) 
+{
+	alias Result(F) = F.Result;
+	alias Race = TTypeMap!(Result, A);
 
-      foreach(i, future; futures[])
-        future.onFulfill((Types[i] result)
-        { anyFuture.fulfill(Race().inject!i(result)); }
-        );
+	shared(Future!Race) race(A futures)
+	{
+		auto anyFuture = pending!Race;
 
-      return anyFuture;
-    }
-  }
+		foreach(i, future; futures)
+			future.onFulfill((Race.Types[i] result)
+			{ anyFuture.fulfill(Race().inject!i(result)); }
+			);
+
+		return anyFuture;
+	}
+}
+template race(Futures...) if(allSatisfy!(isFuture, Futures)) 
+{
+	auto race(Futures futures)
+	{
+		return .race(futures.tuple);
+	}
 }
