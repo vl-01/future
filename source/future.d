@@ -303,7 +303,7 @@ template then(alias f) // applied
 template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types)) 
 {
 	alias Result(F) = F.Result;
-	alias When = TTypeMap!(Result, A);
+	alias When = TypeMap!(Result, A);
 
 	shared(Future!When) when(A futures)
 	{
@@ -312,9 +312,9 @@ template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types))
 		foreach(i, future; futures)
 			future.onFulfill((When.Types[i])
 			{
-				if(all(futures.tlift!isReady[].only))
+				if(all(futures.liftT!isReady[].only))
 					allFuture.fulfill(
-						futures.tlift!result
+						futures.liftT!result
 					);
 			}
 			);
@@ -333,14 +333,14 @@ template when(Futures...) if(allSatisfy!(isFuture, Futures))
 template race(A) if(isTuple!A && allSatisfy!(isFuture, A.Types)) 
 {
 	alias Result(F) = F.Result;
-	alias Race = TTypeMap!(Result, A);
+	alias Race = EquivUnion!(TypeMap!(Result, A));
 
 	shared(Future!Race) race(A futures)
 	{
 		auto anyFuture = pending!Race;
 
 		foreach(i, future; futures)
-			future.onFulfill((Race.Types[i] result)
+			future.onFulfill((Race.Union.Args!i result)
 			{ anyFuture.fulfill(Race().inject!i(result)); }
 			);
 
