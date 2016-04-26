@@ -63,7 +63,7 @@ alias defaultWait = Thread.yield;
   auto ex4b = pending!(Tuple!(int, int));
   auto ex4 = race(ex4a, ex4b);
   assert(ex4.isPending);
-  ex4b.fulfill(1,2);
+  ex4b.fulfill(t_(1,2));
   assert(ex4.isReady);
   assert(ex4.result.visit!(
     (x) => x,
@@ -96,8 +96,8 @@ alias defaultWait = Thread.yield;
   */
   auto ex5b = async!((){ throw new Exception("!"); });
   auto ex5c = async!((){ assert(0, "!"); });
-  assert(ex5b.await.result.failure.exception.msg == "!");
-  assert(ex5c.await.result.failure.error.msg == "!");
+  assert(ex5b.await.result.failureReason == "!");
+  assert(ex5c.await.result.failureReason == "!");
   /*
     by the way, functions that return void can have their result visited with no arguments
   */
@@ -132,8 +132,8 @@ alias defaultWait = Thread.yield;
   ex7b.await; ex7c.await;
   assert(ex7b.isReady && ex7c.isReady);
   assert(ex7a.result == 6);
-  assert(ex7b.result.success == 6);
-  assert(ex7c.result.await.result.success == 6);
+  assert(ex7b.result.successValue == 6);
+  assert(ex7c.result.await.result.successValue == 6);
 }
 
 static:
@@ -224,9 +224,9 @@ template async(alias f) // applied
     static void run(shared(Future!B) future, A args)
     { future.fulfill(g(args)); }
 
-    shared(Future!(B,g)) async(A args)
+    shared(Future!B) async(A args)
     {
-      auto future = pending!(B,g);
+      auto future = pending!B;
 
       spawn(&run, future, args);
 
