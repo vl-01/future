@@ -199,6 +199,10 @@ template onFulfill(A)
       else
         future._onFulfill ~= callback;
   }
+	void onFulfill(shared(Future!A) future, void delegate() callback)
+	{
+		return future.onFulfill((A _){ callback(); });
+	}
 }
 
 alias pending()  = pending!Unit;
