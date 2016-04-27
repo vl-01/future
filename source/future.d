@@ -312,9 +312,9 @@ template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types))
 		foreach(i, future; futures)
 			future.onFulfill((When.Types[i])
 			{
-				if(all(futures.liftT!isReady[].only))
+				if(all(futures.overT!isReady[].only))
 					allFuture.fulfill(
-						futures.liftT!result
+						futures.overT!result
 					);
 			}
 			);
