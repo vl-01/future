@@ -199,6 +199,10 @@ template onFulfill(A)
       else
         future._onFulfill ~= callback;
   }
+	void onFulfill(shared(Future!A) future, void delegate() callback)
+	{
+		return future.onFulfill((A _){ callback(); });
+	}
 }
 
 alias pending()  = pending!Unit;
@@ -312,9 +316,9 @@ template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types))
 		foreach(i, future; futures)
 			future.onFulfill((When.Types[i])
 			{
-				if(all(futures.liftT!isReady[].only))
+				if(all(futures.overT!isReady[].only))
 					allFuture.fulfill(
-						futures.liftT!result
+						futures.overT!result
 					);
 			}
 			);
