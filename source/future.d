@@ -21,16 +21,27 @@ alias defaultWait = Thread.yield;
 @("EXAMPLES") unittest
 {
   /*
-    basic usage
+    create a future object to be assigned a value later
   */
   auto ex1 = pending!int;
   assert(ex1.isPending);
   ex1.fulfill(6);
   assert(ex1.isReady);
   assert(ex1.result == 6);
+  /*
+    create a trivial future object out of a value
+    (equivalent to haskell's `pure` or `return`)
+  */
+  auto ex1a = ready!int(2);
+  assert(ex1a.isReady);
+  assert(ex1a.result == 2);
 
   /*
-    then: mapping over futures
+    then: map over futures
+
+    takes a function from A to B, and lifts it into a function from Future!A to Future!B
+
+    (equivalent to to haskell's `fmap`)
   */
   auto ex2a = pending!int;
   auto ex2b = ex2a.then!((int x) => x * 2);
@@ -42,6 +53,8 @@ alias defaultWait = Thread.yield;
   /*
     when: maps a tuple of futures to a future tuple 
       completes when all complete
+
+    (the logical AND of Futures)
   */
   auto ex3a = pending!int;
   auto ex3b = pending!int;
@@ -58,6 +71,8 @@ alias defaultWait = Thread.yield;
   /*
     race: maps a tuple of futures to a future union
       inhabited by the first of the futures to complete
+
+    (the logical OR of Futures)
   */
   auto ex4a = pending!int;
   auto ex4b = pending!(Tuple!(int, int));
@@ -96,8 +111,8 @@ alias defaultWait = Thread.yield;
   */
   auto ex5b = async!((){ throw new Exception("!"); });
   auto ex5c = async!((){ assert(0, "!"); });
-  assert(ex5b.await.result.failureReason == "!");
-  assert(ex5c.await.result.failureReason == "!");
+  assert(ex5b.await.result.failure.exception.msg == "!");
+  assert(ex5c.await.result.failure.error.msg == "!");
   /*
     by the way, functions that return void can have their result visited with no arguments
   */
@@ -110,6 +125,10 @@ alias defaultWait = Thread.yield;
     sync: flattens nested futures into one future
       the new future waits until both nested futures are complete
       then forwards the result from the inner future
+
+    in other words, it is a function from Future!(Future!A) to Future!A
+
+    (equivalent to haskell's `join`)
   */
   auto ex6a = pending!(shared(Future!(int)));
   auto ex6 = sync(ex6a);
@@ -123,6 +142,11 @@ alias defaultWait = Thread.yield;
   /*
     next: chains the fulfillment of one future into the launching of another
       enables comfortable future sequencing
+
+    takes a function from A to Future!B and lifts it into a function from Future!A to Future!B
+    it is equivalent to calling `then` followed by `sync`
+
+    (equivalent to haskell's `bind` or `>>=`)
   */
   auto ex7a = pending!(int);
   auto ex7b = ex7a.next!(async!((int i) => i));
@@ -132,8 +156,8 @@ alias defaultWait = Thread.yield;
   ex7b.await; ex7c.await;
   assert(ex7b.isReady && ex7c.isReady);
   assert(ex7a.result == 6);
-  assert(ex7b.result.successValue == 6);
-  assert(ex7c.result.await.result.successValue == 6);
+  assert(ex7b.result.success == 6);
+  assert(ex7c.result.await.result.success == 6);
 }
 
 static:
@@ -142,7 +166,7 @@ template Future(A)
 {
   final shared class Future
   {
-    alias Result = A;
+    alias Eventual = A;
 
     private:
     void delegate(A)[] _onFulfill;
@@ -306,8 +330,8 @@ template then(alias f) // applied
 
 template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types)) 
 {
-	alias Result(F) = F.Result;
-	alias When = TypeMap!(Result, A);
+	alias EventualType(F) = F.Eventual;
+	alias When = Tuple!(staticMap!(EventualType, A.Types));
 
 	shared(Future!When) when(A futures)
 	{
@@ -316,9 +340,9 @@ template when(A) if(isTuple!A && allSatisfy!(isFuture, A.Types))
 		foreach(i, future; futures)
 			future.onFulfill((When.Types[i])
 			{
-				if(all(futures.overT!isReady[].only))
+				if(all(futures.tlift!isReady[].only))
 					allFuture.fulfill(
-						futures.overT!result
+						futures.tlift!result
 					);
 			}
 			);
@@ -336,8 +360,8 @@ template when(Futures...) if(allSatisfy!(isFuture, Futures))
 
 template race(A) if(isTuple!A && allSatisfy!(isFuture, A.Types)) 
 {
-	alias Result(F) = F.Result;
-	alias Race = EquivUnion!(TypeMap!(Result, A));
+	alias EventualType(F) = F.Eventual;
+	alias Race = Union!(staticMap!(EventualType, A.Types));
 
 	shared(Future!Race) race(A futures)
 	{
